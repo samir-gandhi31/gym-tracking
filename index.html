@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lift Tracker</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--ink:#1c1c1a;--mut:#75736c;--line:#e4e2da;--acc:#0f766e;--accbg:#d9f0ec;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#141413;--card:#1f1f1d;--ink:#f0eee8;--mut:#9a978e;--line:#33332f;--acc:#4fd1c5;--accbg:#153b37;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#141413;--card:#1f1f1d;--ink:#f0eee8;--mut:#9a978e;--line:#33332f;--acc:#4fd1c5;--accbg:#153b37;color-scheme:dark}
+*{box-sizing:border-box}html{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:560px;margin:0 auto;padding:16px 14px 60px}
+h1{font-size:22px;margin:4px 0 2px}.sub{color:var(--mut);font-size:14px;margin-bottom:14px}
+.tabs{display:flex;gap:6px;margin-bottom:14px}
+.tabs button{flex:1;padding:10px 4px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;font:inherit;font-size:14px}
+.tabs button.on{background:var(--acc);color:var(--bg);border-color:var(--acc);font-weight:600}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.card h3{margin:0;font-size:16px}.tgt{color:var(--mut);font-size:13px;margin-bottom:8px}
+.set{display:grid;grid-template-columns:28px 1fr 1fr;gap:8px;align-items:center;margin-top:6px}
+.set span{color:var(--mut);font-size:13px}
+input{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pill{font-size:12px;padding:3px 8px;border-radius:99px;background:var(--accbg);color:var(--acc)}
+.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.top input{width:auto}
+.link{background:none;border:0;color:var(--acc);font:inherit;font-size:14px;padding:6px 0}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:5px 4px;border-bottom:1px solid var(--line)}th{color:var(--mut);font-weight:500}
+.wrap{overflow-x:auto}#status{font-size:12px;color:var(--mut)}
+</style></head><body><main>
+<h1>Lift Tracker</h1>
+<div class="sub">4 days · ~30 min · <span id="status">loading…</span></div>
+<div class="tabs" id="tabs"></div>
+<div class="top"><input type="date" id="date"><span><button class="link" id="unit"></button> · <button class="link" id="sync">Sync</button></span></div>
+<div id="view"></div>
+</main>
+<script>
+var PLAN={
+1:{n:"Upper · Push",ex:[["bench","A1 Dumbbell bench press",3,"8-12"],["cable-row","A2 Seated cable row",3,"8-12"],["ohp","B1 Dumbbell shoulder press",3,"8-12"],["pulldown","B2 Lat pulldown",3,"8-12"],["tri","C Triceps pushdown",2,"12"],["bi","C Biceps curl",2,"12"]]},
+2:{n:"Lower · Quad",ex:[["legpress","A Leg press",3,"8-12"],["rdl","B1 Dumbbell Romanian deadlift",3,"8-12"],["legext","B2 Leg extension",3,"12-15"],["calf","C1 Standing calf raise",3,"12-15"],["knee","C2 Hanging knee raise",3,"10-15"]]},
+3:{n:"Upper · Pull",ex:[["pulldown","A1 Lat pulldown",3,"8-12"],["incline","A2 Incline dumbbell press",3,"8-12"],["dbrow","B1 Dumbbell row (per side)",3,"10"],["lat","B2 Lateral raise",3,"12-15"],["face","C Face pull",2,"12-15"],["hammer","C Hammer curl",2,"12-15"]]},
+4:{n:"Lower · Glute/Ham",ex:[["hip","A Hip thrust",3,"8-12"],["bss","B1 Bulgarian split squat (per leg)",3,"10"],["legcurl","B2 Leg curl",3,"10-15"],["calf","C1 Calf raise",3,"12-15"],["plank","C2 Plank (sec in reps)",3,"30-45"]]}
+};
+var S={unit:"lb",sessions:{}},day=1,store=null,timer=null,tab="log";
+function $(i){return document.getElementById(i)}
+function today(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")}
+function key(){return $("date").value+"_d"+day}
+function status(t){$("status").textContent=t}
+function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]})}
+
+function lastFor(id){
+  var ks=Object.keys(S.sessions).filter(function(k){return k<key()}).sort().reverse();
+  for(var i=0;i<ks.length;i++){var e=S.sessions[ks[i]].ex[id];if(e&&e.some(function(s){return s&&(s.w||s.r)}))return e}
+  return null}
+
+function renderTabs(){
+  var h="";for(var d=1;d<=4;d++)h+='<button class="'+(d==day&&tab=="log"?"on":"")+'" data-d="'+d+'">D'+d+'</button>';
+  h+='<button class="'+(tab=="hist"?"on":"")+'" data-d="h">Progress</button>';
+  $("tabs").innerHTML=h;
+  Array.prototype.forEach.call($("tabs").children,function(b){b.onclick=function(){var v=b.dataset.d;if(v=="h")tab="hist";else{tab="log";day=+v}render()}})}
+
+function renderLog(){
+  var p=PLAN[day],ss=S.sessions[key()]||{ex:{}},h='<div class="row" style="margin-bottom:8px"><strong>'+p.n+'</strong><span class="pill">Day '+day+'</span></div>';
+  p.ex.forEach(function(e){
+    var id=e[0],last=lastFor(id),cur=ss.ex[id]||[];
+    h+='<div class="card"><h3>'+esc(e[1])+'</h3><div class="tgt">'+e[2]+' × '+e[3]+(last?' · last: '+last.map(function(s){return (s.w||"–")+"×"+(s.r||"–")}).join(", "):'')+'</div>';
+    for(var i=0;i<e[2];i++){
+      var c=cur[i]||{},l=last&&last[i]||{};
+      h+='<div class="set"><span>#'+(i+1)+'</span><input inputmode="decimal" placeholder="'+(l.w||S.unit)+'" value="'+(c.w||"")+'" data-id="'+id+'" data-i="'+i+'" data-f="w" aria-label="weight"><input inputmode="decimal" placeholder="'+(l.r||"reps")+'" value="'+(c.r||"")+'" data-id="'+id+'" data-i="'+i+'" data-f="r" aria-label="reps"></div>'}
+    h+='</div>'});
+  $("view").innerHTML=h;
+  Array.prototype.forEach.call($("view").querySelectorAll("input"),function(inp){inp.oninput=function(){
+    var k=key(),s=S.sessions[k]||(S.sessions[k]={date:$("date").value,day:day,ex:{}});
+    var a=s.ex[inp.dataset.id]||(s.ex[inp.dataset.id]=[]);
+    a[+inp.dataset.i]=a[+inp.dataset.i]||{};a[+inp.dataset.i][inp.dataset.f]=inp.value;save()}})}
+
+function renderHist(){
+  var best={},names={};
+  Object.keys(PLAN).forEach(function(d){PLAN[d].ex.forEach(function(e){names[e[0]]=e[1].replace(/^[A-C]\d?\s/,"")})});
+  Object.keys(S.sessions).sort().forEach(function(k){var s=S.sessions[k];Object.keys(s.ex).forEach(function(id){
+    var m=0;s.ex[id].forEach(function(x){var w=parseFloat(x&&x.w);if(w>m)m=w});
+    if(m>0)(best[id]=best[id]||[]).push([s.date,m])})});
+  var ids=Object.keys(best);
+  if(!ids.length){$("view").innerHTML='<div class="card tgt">Log a workout and your top weight per exercise shows up here.</div>';return}
+  var h='<div class="card wrap"><table><tr><th>Exercise</th><th>Top set ('+S.unit+')</th><th>Change</th></tr>';
+  ids.forEach(function(id){var b=best[id],f=b[0][1],l=b[b.length-1][1],d=l-f;
+    h+='<tr><td>'+esc(names[id]||id)+'</td><td>'+b.slice(-4).map(function(x){return x[1]}).join(" → ")+'</td><td>'+(d>0?"+":"")+d+'</td></tr>'});
+  $("view").innerHTML=h+'</table></div>'}
+
+function render(){renderTabs();$("unit").textContent="Unit: "+S.unit+" (tap to switch)";$("date").style.display=tab=="log"?"":"none";tab=="log"?renderLog():renderHist()}
+
+var SUPABASE_URL="https://pbhjumzsvksnmotohlbp.supabase.co";   // e.g. https://abcd1234.supabase.co
+var SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBiaGp1bXpzdmtzbm1vdG9obGJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI1NDIxODQsImV4cCI6MjEwODExODE4NH0.S7BZQzv3OUpqJBN6xMEoCibwrKdhYz7d38xeY3LuWEo";   // your anon / publishable key
+var CLOUD=!!(SUPABASE_URL&&SUPABASE_KEY),SYNC=null;
+function syncKey(){
+  try{SYNC=localStorage.getItem("lt-sync")}catch(e){}
+  if(!SYNC){SYNC=Array.from(crypto.getRandomValues(new Uint8Array(24))).map(function(b){return b.toString(16).padStart(2,"0")}).join("");try{localStorage.setItem("lt-sync",SYNC)}catch(e){}}
+  return SYNC}
+function hdr(){var h={"apikey":SUPABASE_KEY,"Content-Type":"application/json","x-sync-key":syncKey()};if(SUPABASE_KEY.indexOf("eyJ")==0)h.Authorization="Bearer "+SUPABASE_KEY;return h}
+function cache(){try{localStorage.setItem("lift-tracker",JSON.stringify(S))}catch(e){}}
+function save(){S.ts=Date.now();cache();status("saving…");clearTimeout(timer);timer=setTimeout(persist,700)}
+async function persist(){
+  if(!CLOUD){status("saved on this device");return}
+  try{
+    var r=await fetch(SUPABASE_URL+"/rest/v1/workouts",{method:"POST",headers:Object.assign(hdr(),{"Prefer":"resolution=merge-duplicates,return=minimal"}),body:JSON.stringify({sync_key:syncKey(),data:S,updated_at:new Date().toISOString()})});
+    status(r.ok?"synced":"saved on device · sync failed ("+r.status+")")
+  }catch(e){status("saved on device · offline")}}
+async function load(){
+  try{var raw=localStorage.getItem("lift-tracker");if(raw)S=JSON.parse(raw)}catch(e){}
+  if(!CLOUD){status("saved on this device");return}
+  try{
+    var r=await fetch(SUPABASE_URL+"/rest/v1/workouts?sync_key=eq."+syncKey()+"&select=data",{headers:hdr()});
+    if(!r.ok){status("sync error ("+r.status+")");return}
+    var rows=await r.json();
+    if(rows.length&&rows[0].data&&(rows[0].data.ts||0)>=(S.ts||0)){S=rows[0].data;cache()}
+    else if(S.ts)persist();
+    status("synced")
+  }catch(e){status("offline · using device copy")}}
+
+$("date").value=today();
+$("date").onchange=render;
+$("sync").onclick=function(){
+  if(!CLOUD){alert("Cloud sync isn't set up yet. Add your Supabase URL and key at the top of the script.");return}
+  var v=prompt("Your sync code. Copy it, then paste it on your other device to link them. To link THIS device to another, replace it with that device's code:",syncKey());
+  if(v&&v.trim()&&v.trim()!==SYNC){try{localStorage.setItem("lt-sync",v.trim());localStorage.removeItem("lift-tracker")}catch(e){}location.reload()}};
+$("unit").onclick=function(){S.unit=S.unit=="lb"?"kg":"lb";save();render()};
+render();
+load().then(function(){
+  var ks=Object.keys(S.sessions).sort();if(ks.length){var l=S.sessions[ks[ks.length-1]];day=l.day%4+1}
+  render()});
+</script></body></html>
